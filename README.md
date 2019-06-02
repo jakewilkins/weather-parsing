@@ -8,6 +8,8 @@ I'm putting it on GitHub so I can get some little green squares for motivation.
 
 TAF source: [aviationweather.gov/taf](https://aviationweather.gov/taf)
 
+Spec(ish): [here](https://aviationweather.gov/static/help/taf-decode.php)
+
 ```
 ./taf-decoder "TAF KLAX 022012Z 0220/0324 25007KT P6SM OVC023
   FM030500 25006KT P6SM BKN025
