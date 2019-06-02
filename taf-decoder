@@ -1,0 +1,216 @@
+#!/bin/bash
+
+source /usr/local/opt/chruby/share/chruby/chruby.sh
+chruby 2.5.1
+
+exec ruby $0 $@
+
+#!ruby
+
+class Taf
+
+  class TafPart
+    def self.range=(range)
+      @range = range
+    end
+
+    def self.range
+      @range
+    end
+
+    attr_reader :string
+    def initialize(str)
+      @string = str
+    end
+  end
+
+  class GeneratedAt < TafPart
+    self.range = 0..6
+  end
+
+  class ValidRange < TafPart
+    self.range = 0..5
+    def self.fetch(string)
+      if string.include?("/")
+        slant = string.index("/")
+        new(string.slice!(0..(slant + 4)))
+      else
+        new(string.slice!(range))
+      end
+    end
+  end
+
+  class Wind < TafPart
+    self.range = 0..6
+
+    def self.fetch(string)
+      upper_bound = string.index("KT")
+      return unless upper_bound
+      new(string.slice!(0..(upper_bound + 1)))
+    end
+  end
+
+  class Visibility < TafPart
+    def self.fetch(string)
+      upper_bound = string.index("SM")
+      return unless upper_bound
+      new(string.slice!(0..(upper_bound + 1)))
+    end
+  end
+
+  class Weather < TafPart
+    TYPES = {
+      # Precipitation
+      "DZ" => :drizzle,
+      "RA" => :rain,
+      "SN" => :snow,
+      "IC" => :ice_crystals,
+      "PL" => :ice_pellets,
+      "GR" => :hail,
+      "GS" => :small_hail_or_snow_pellets,
+      "UP" => :unknown_precip,
+      # Obscuration
+      "BR" => :mist,
+      "FG" => :fog,
+      "FU" => :smoke,
+      "DU" => :dust,
+      "SA" => :sand,
+      "HZ" => :haze,
+      "PY" => :spray,
+      "VA" => :volcanic_ash,
+      # Other
+      "PO" => :dust_sand_whirls,
+      "SQ" => :squalls,
+      "FC" => :funnel_cloud,
+      "SS" => :sandstorm,
+      "DS" => :duststorm
+    }
+
+    MATCHER = /(#{TYPES.keys.join("|")})/
+
+    def self.fetch(string)
+      weather_bits = []
+      parts = string.split(" ")
+      while MATCHER.match?(parts.first)
+        weather_bits << parts.shift
+      end
+      string.gsub!(weather_bits.join(" "), "")
+      new(weather_bits)
+    end
+  end
+
+  class SkyCondition < TafPart
+    TYPES = {
+      "CLR" => :clear,
+      "SKC" => :clear,
+      "FEW" => :few,
+      "SCT" => :scattered,
+      "BKN" => :broken,
+      "OVC" => :overcast,
+      "VV" => :vertical_visibility
+    }
+    MATCHER = /(#{TYPES.keys.join("|")})/
+
+    def self.fetch(string)
+      coverage_bits = []
+      parts = string.split(" ")
+      while MATCHER.match?(parts.first)
+        coverage_bits << parts.shift
+      end
+      string.gsub!(coverage_bits.join(" "), "")
+      new(coverage_bits)
+    end
+  end
+
+  class WindShear < TafPart
+    def self.fetch(string)
+      return unless string[0..1] == "WS"
+
+      new(string.slice!(0..12))
+    end
+  end
+
+  class FromGroup < TafPart
+    def self.fetch(string, fetched = nil)
+      return fetched unless string[0..1] == "FM"
+      fetched ||= []
+
+      group = string.split(" ", 2).first
+      string.gsub!(group, "")
+      string.lstrip!
+      wind = Wind.fetch(string)
+      string.lstrip!
+      visibility = Visibility.fetch(string)
+      string.lstrip!
+      condition = SkyCondition.fetch(string)
+      string.lstrip!
+
+      fetched << new([group, wind, visibility, condition])
+
+      fetch(string, fetched)
+    end
+  end
+
+  attr_reader :string, :type, :location, :time, :valid_range
+
+  def initialize(str)
+    @string = str
+  end
+
+  def parse
+    get_report_type
+    raise "invalid report type" unless type == :taf
+    get_location
+
+    {time: GeneratedAt, valid_range: ValidRange, wind: Wind, visibility: Visibility,
+     weather: Weather, sky_condition: SkyCondition, wind_shear: WindShear, from_groups: FromGroup
+    }.each do |attr, klass|
+      fetch_part(attr, klass)
+    end
+
+    binding.pry if defined?(Pry)
+  end
+
+  private
+
+  def get_report_type
+    if @string.slice!(0..2) == "TAF"
+      @type = :taf
+      @string.lstrip!
+    end
+  end
+
+  def get_location
+    @location = @string.slice!(0..3)
+    @string.lstrip!
+  end
+
+  def fetch_part(var, klass)
+    inst = if klass.respond_to?(:fetch)
+      klass.fetch(string)
+    else
+      klass.new(@string.slice!(klass.range))
+    end
+    instance_variable_set(:"@#{var}", inst)
+    @string.lstrip!
+  end
+
+  def get_generated_at
+    @time = GeneratedAt.new(string.slice!(0..6))
+    @string.lstrip!
+  end
+
+  def get_valid_range
+    @valid_range = ValidRange.new(string.slice(0..5))
+    @string.lstrip!
+  end
+end
+
+begin
+  require "pry"
+rescue Exception
+end
+
+Taf.new(ARGV.join(" ")).parse
+
+# vim: ft=ruby
